@@ -7,9 +7,11 @@ Shader "Missnish/CustomPBR"
         _MetallicTex ("Metallic", 2D) = "white" {}
         _Roughness ("Roughness", Range(0, 1)) = 0
         _NormalTex("Normal", 2D) = "bump"{}
+        _NormalIntensity("Normal Intensity", float) = 1.0
         _AOTex("Ambient Occlusion", 2D) = "white"{}
+        _AOIntensity("Ambient Occlusion Intensity", Range(0, 1)) = 1.0
         _CubeMap("CubeMap", Cube) = "white"{}
-        _CubeMapIntensity("CubeMap Intensity", float) = 1.0
+        _CubeMapIntensity("CubeMap Light Intensity", float) = 1.0
     }
     SubShader
     {
@@ -55,7 +57,9 @@ Shader "Missnish/CustomPBR"
             sampler2D _AOTex;
             samplerCUBE _CubeMap;
             float4 _CubeMap_HDR;
+            float _AOIntensity;
             float _CubeMapIntensity;
+            float _NormalIntensity;
             
             
             //-----------------------Vertex Shader-----------------------
@@ -118,10 +122,11 @@ Shader "Missnish/CustomPBR"
             fixed4 frag (v2f i) : SV_Target
             {
                 //数据准备
-                float4 normal_Map = tex2D(_NormalTex, i.uv);
-                float3 normal_data = UnpackNormal(normal_Map);          //对法线数据进行解码，将压缩的法线数据从[0,1]恢复成[-1,1]
+                float4 normalMap = (tex2D(_NormalTex, i.uv));
+                float3 normalData = UnpackNormal(normalMap);          //对法线数据进行解码，将压缩的法线数据从[0,1]恢复成[-1,1]
+                normalData.xy *= _NormalIntensity;
                 float3x3 TBN = float3x3(i.tangent, i.binormal, i.normal);
-                float3 normalDir = normalize(mul(normal_data.xyz, TBN));
+                float3 normalDir = normalize(mul(normalData.xyz, TBN));
                 float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - i.posWS.xyz);
                 float3 lightDir = normalize(_WorldSpaceLightPos0.xyz);
                 float3 halfDir = normalize(viewDir + lightDir);
@@ -131,7 +136,8 @@ Shader "Missnish/CustomPBR"
                 float3 baseColor = _Color * pow(tex2D(_MainTex, i.uv), 2.2);
                 float roughness = _Roughness;
                 float metalness = tex2D(_MetallicTex, i.uv);
-                float ao = tex2D(_AOTex, i.uv);           
+                float aoMap = tex2D(_AOTex, i.uv);    
+                float ao = lerp(1, aoMap, _AOIntensity);
 
                 float NdotH = max(0.00001, dot(normalDir, halfDir));
                 float NdotL = max(0.00001, dot(normalDir, lightDir));       //入射方向即光线方向: ωi - lightDir
@@ -141,7 +147,7 @@ Shader "Missnish/CustomPBR"
                 float NDF = NormalDistribution(NdotH, roughness);
                 float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metalness);
                 float3 ks = Fresnel(NdotV, F0);
-                float directG = Geometry(NdotL, NdotV, roughness, kDirect(roughness)) * ao;
+                float directG = Geometry(NdotL, NdotV, roughness, kDirect(roughness));
 
                 float3 directSpecularBRDF = (NDF * ks * directG) / (4 * NdotL * NdotV);            //镜面反射BRDF
                 float3 lightEnergy = lightColor * NdotL;                                           //受光程度
@@ -155,20 +161,20 @@ Shader "Missnish/CustomPBR"
                 
                 //Indirect: Specular - CubeMap Specular; Reflection Probe
                 float roughnessSmooth = roughness * (1.7 - 0.7 * roughness);            //粗糙度缓动曲线
-                half mipLevel = roughness * 6.0;                                  //6 - PBR中通常的MipMap层数
+                half mipLevel = roughness * 6.0;                                        //6 - PBR中通常取的MipMap层数
                 float4 cubeMapSpecularColor = texCUBE(_CubeMap, float4(reflectDir, mipLevel));
                 float3 envLightSpecularEnergy = DecodeHDR(cubeMapSpecularColor, _CubeMap_HDR) * _CubeMapIntensity;
-                float indirectG = Geometry(NdotL, NdotV, roughness, kIBL(roughness)) * ao;
+                float indirectG = Geometry(NdotL, NdotV, roughness, kIBL(roughness));
                 float3 indirectSpecularBRDF = (NDF * ks * indirectG) / (4 * NdotL * NdotV);
                 float3 indirectSpecular = indirectSpecularBRDF * envLightSpecularEnergy;
 
                 //Indirect: Diffuse - CubeMap Diffuse; 球谐函数(SH); Light Probe
-                float4 cubeMapDiffuseColor = texCUBElod(_CubeMap, float4(normalDir, mipLevel));      //方法一: 用NormalDir采样CubeMap的Diffuse
+                float4 cubeMapDiffuseColor = texCUBElod(_CubeMap, float4(normalDir, mipLevel));                     //方法一: 用NormalDir采样CubeMap的Diffuse
                 float3 envLightDiffuseEnergy = DecodeHDR(cubeMapDiffuseColor, _CubeMap_HDR) * _CubeMapIntensity;
-                //float3 getSH = ShadeSH9(float4(normalDir, 1.0));                                      //方法二: 球谐函数
+                //float3 getSH = ShadeSH9(float4(normalDir, 1.0));                                                  //方法二: 球谐函数
                 float3 indirectDiffuse = kd * baseColor * envLightDiffuseEnergy;
 
-                float3 finalRGB = directSpecular + directDiffuse + indirectSpecular + indirectDiffuse;
+                float3 finalRGB = (directSpecular + directDiffuse + indirectSpecular + indirectDiffuse) * ao;
                 return float4(finalRGB,1.0);
             }
 
