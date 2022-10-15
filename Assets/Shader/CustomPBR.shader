@@ -2,9 +2,14 @@ Shader "Missnish/CustomPBR"
 {
     Properties
     {
+        _Color("Color", Color) = (1.0, 1.0, 1.0)
         _MainTex ("Albedo", 2D) = "white" {}
-        _Metallic ("Metallic", 2D) = "white" {}
+        _MetallicTex ("Metallic", 2D) = "white" {}
         _Roughness ("Roughness", Range(0, 1)) = 0
+        _NormalTex("Normal", 2D) = "bump"{}
+        _AOTex("Ambient Occlusion", 2D) = "white"{}
+        _CubeMap("CubeMap", Cube) = "white"{}
+        _CubeMapIntensity("CubeMap Intensity", float) = 1.0
     }
     SubShader
     {
@@ -27,21 +32,30 @@ Shader "Missnish/CustomPBR"
                 float4 vertex : POSITION;
                 float2 uv : TEXCOORD0;
                 float3 normal : NORMAL;
+                float4 tangent : TANGENT;
             };
 
             struct v2f
             {
                 float2 uv : TEXCOORD0;
                 float4 pos : SV_POSITION;
-                float3 normal : TEXCOORD1;
-                float3 posWS : TEXCOORD2;
+                float3 posWS : TEXCOORD1;
+                float3 normal : TEXCOORD2;
+                float3 tangent : TEXCOORD3;
+                float3 binormal : TEXCOORD4;
                 
             };
 
+            float3 _Color;
             sampler2D _MainTex;
             float4 _MainTex_ST;
-            sampler2D _Metallic;
+            sampler2D _MetallicTex;
             float _Roughness;
+            sampler2D _NormalTex;
+            sampler2D _AOTex;
+            samplerCUBE _CubeMap;
+            float4 _CubeMap_HDR;
+            float _CubeMapIntensity;
             
             
             //-----------------------Vertex Shader-----------------------
@@ -52,6 +66,10 @@ Shader "Missnish/CustomPBR"
                 o.uv = TRANSFORM_TEX(v.uv, _MainTex);
                 o.posWS = mul(unity_ObjectToWorld, v.vertex);
                 o.normal = UnityObjectToWorldNormal(v.normal);
+                o.tangent = normalize(mul(unity_ObjectToWorld, v.tangent).xyz);
+                //v.tangent.w：tangent的第四个分量，为了处理不同平台下的兼容性问题
+                o.binormal = cross(o.normal, o.tangent) * v.tangent.w;
+
                 return o;
             }
 
@@ -89,9 +107,9 @@ Shader "Missnish/CustomPBR"
             }
 
             //菲涅尔方程
-            float3 Fresnel(float HdotV, float3 F0)
+            float3 Fresnel(float NdotV, float3 F0)
             {
-                float3 resultF = F0 + (1.0 - F0) * pow(1.0 - HdotV, 5);
+                float3 resultF = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5);
                 return resultF;
             }
 
@@ -100,45 +118,57 @@ Shader "Missnish/CustomPBR"
             fixed4 frag (v2f i) : SV_Target
             {
                 //数据准备
-                float3 normalDir = normalize(i.normal);
+                float4 normal_Map = tex2D(_NormalTex, i.uv);
+                float3 normal_data = UnpackNormal(normal_Map);          //对法线数据进行解码，将压缩的法线数据从[0,1]恢复成[-1,1]
+                float3x3 TBN = float3x3(i.tangent, i.binormal, i.normal);
+                float3 normalDir = normalize(mul(normal_data.xyz, TBN));
                 float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - i.posWS.xyz);
                 float3 lightDir = normalize(_WorldSpaceLightPos0.xyz);
                 float3 halfDir = normalize(viewDir + lightDir);
-                float3 lightColor = _LightColor0.rgb;
+                float3 reflectDir = normalize(reflect(-viewDir, normalDir));
 
-                float3 baseColor = tex2D(_MainTex, i.uv);
+                float3 lightColor = _LightColor0.rgb;
+                float3 baseColor = _Color * pow(tex2D(_MainTex, i.uv), 2.2);
                 float roughness = _Roughness;
-                float metalness = tex2D(_Metallic, i.uv);
+                float metalness = tex2D(_MetallicTex, i.uv);
+                float ao = tex2D(_AOTex, i.uv);           
 
                 float NdotH = max(0.00001, dot(normalDir, halfDir));
                 float NdotL = max(0.00001, dot(normalDir, lightDir));       //入射方向即光线方向: ωi - lightDir
                 float NdotV = max(0.00001, dot(normalDir, viewDir));        //出射方向即观察方向: ωo - viewDir
-                float HdotV = max(0.00001, dot(halfDir, viewDir));
-
 
                 //Direct: Specular
-                float directD = NormalDistribution(NdotH, roughness);
+                float NDF = NormalDistribution(NdotH, roughness);
                 float3 F0 = lerp(float3(0.04, 0.04, 0.04), baseColor, metalness);
-                float3 directF = Fresnel(HdotV, F0);
-                float directG = Geometry(NdotL, NdotV, roughness, kDirect(roughness));
+                float3 ks = Fresnel(NdotV, F0);
+                float directG = Geometry(NdotL, NdotV, roughness, kDirect(roughness)) * ao;
 
-                float3 directSpecularBRDF = (directD * directF * directG) / (4 * NdotL * NdotV);     //镜面反射BRDF
-                float3 lightEnergy = lightColor * NdotL;                                             //受光程度
+                float3 directSpecularBRDF = (NDF * ks * directG) / (4 * NdotL * NdotV);            //镜面反射BRDF
+                float3 lightEnergy = lightColor * NdotL;                                           //受光程度
 
-                float3 directSpecular = directSpecularBRDF * lightEnergy;                                //直接光 - 镜面反射结果
+                float3 directSpecular = directSpecularBRDF * lightEnergy * UNITY_PI;               //直接光 - 镜面反射结果
 
                 //Direct: Diffuse
-                float kDiffuse = (1.0 - directF) * (1.0 - metalness);
-                float3 directDiffuseBRDF = kDiffuse * baseColor;                                     //漫反射BRDF
-                float3 directDiffuse = directDiffuseBRDF * lightEnergy;                                  //直接光 - 漫反射结果
+                float kd = (1.0 - ks) * (1.0 - metalness);
+                float3 directDiffuseBRDF = kd * baseColor;                                           //漫反射BRDF
+                float3 directDiffuse = pow(directDiffuseBRDF * lightEnergy, 1 / 2.2);                //直接光 - 漫反射结果
                 
-                //Indirect: Specular - CubeMap
+                //Indirect: Specular - CubeMap Specular; Reflection Probe
+                float roughnessSmooth = roughness * (1.7 - 0.7 * roughness);            //粗糙度缓动曲线
+                half mipLevel = roughness * 6.0;                                  //6 - PBR中通常的MipMap层数
+                float4 cubeMapSpecularColor = texCUBE(_CubeMap, float4(reflectDir, mipLevel));
+                float3 envLightSpecularEnergy = DecodeHDR(cubeMapSpecularColor, _CubeMap_HDR) * _CubeMapIntensity;
+                float indirectG = Geometry(NdotL, NdotV, roughness, kIBL(roughness)) * ao;
+                float3 indirectSpecularBRDF = (NDF * ks * indirectG) / (4 * NdotL * NdotV);
+                float3 indirectSpecular = indirectSpecularBRDF * envLightSpecularEnergy;
 
+                //Indirect: Diffuse - CubeMap Diffuse; 球谐函数(SH); Light Probe
+                float4 cubeMapDiffuseColor = texCUBElod(_CubeMap, float4(normalDir, mipLevel));      //方法一: 用NormalDir采样CubeMap的Diffuse
+                float3 envLightDiffuseEnergy = DecodeHDR(cubeMapDiffuseColor, _CubeMap_HDR) * _CubeMapIntensity;
+                //float3 getSH = ShadeSH9(float4(normalDir, 1.0));                                      //方法二: 球谐函数
+                float3 indirectDiffuse = kd * baseColor * envLightDiffuseEnergy;
 
-                //Indirect: Diffuse - 球谐系数(SH); Light Probe
-
-
-                float3 finalRGB = directSpecular + directDiffuse;
+                float3 finalRGB = directSpecular + directDiffuse + indirectSpecular + indirectDiffuse;
                 return float4(finalRGB,1.0);
             }
 

@@ -19,6 +19,18 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _AO:
+        m_Texture: {fileID: 2800000, guid: 6af4edaf43f9adf4d8d44b37e8068f31, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _AOTex:
+        m_Texture: {fileID: 2800000, guid: 6af4edaf43f9adf4d8d44b37e8068f31, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _CubeMap:
+        m_Texture: {fileID: 8900000, guid: 02ada4cfa930fca439bcac331762ddc0, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MainTex:
         m_Texture: {fileID: 2800000, guid: 0aa2f7635a8139b4ebcd6c751a6eaa10, type: 3}
         m_Scale: {x: 1, y: 1}
@@ -27,7 +39,21 @@ Material:
         m_Texture: {fileID: 2800000, guid: 7da33b55ab5442040a3b9c05b1d862d9, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _MetallicTex:
+        m_Texture: {fileID: 2800000, guid: 7da33b55ab5442040a3b9c05b1d862d9, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Normal:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _NormalTex:
+        m_Texture: {fileID: 2800000, guid: 8cef904e57048b2469ee73f5244c1eb6, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Floats:
-    - _Roughness: 0.164
-    m_Colors: []
+    - _CubeMapIntensity: 2.24
+    - _Roughness: 0.675
+    m_Colors:
+    - _Color: {r: 0.9, g: 1, b: 0.9978035, a: 1}
   m_BuildTextureStacks: []
