@@ -133,6 +133,7 @@ Shader "Missnish/CustomPBR"
                 float3 reflectDir = normalize(reflect(-viewDir, normalDir));
 
                 float3 lightColor = _LightColor0.rgb;
+                //float3 baseColor = _Color * tex2D(_MainTex, i.uv);
                 float3 baseColor = _Color * pow(tex2D(_MainTex, i.uv), 2.2);
                 float roughness = _Roughness;
                 float metalness = tex2D(_MetallicTex, i.uv);
@@ -157,6 +158,7 @@ Shader "Missnish/CustomPBR"
                 //Direct: Diffuse
                 float kd = (1.0 - ks) * (1.0 - metalness);
                 float3 directDiffuseBRDF = kd * baseColor;                                           //漫反射BRDF
+                //float3 directDiffuse = directDiffuseBRDF * lightEnergy;
                 float3 directDiffuse = pow(directDiffuseBRDF * lightEnergy, 1 / 2.2);                //直接光 - 漫反射结果
                 
                 //Indirect: Specular - CubeMap Specular; Reflection Probe
@@ -171,8 +173,8 @@ Shader "Missnish/CustomPBR"
                 //Indirect: Diffuse - CubeMap Diffuse; 球谐函数(SH); Light Probe
                 float4 cubeMapDiffuseColor = texCUBElod(_CubeMap, float4(normalDir, mipLevel));                     //方法一: 用NormalDir采样CubeMap的Diffuse
                 float3 envLightDiffuseEnergy = DecodeHDR(cubeMapDiffuseColor, _CubeMap_HDR) * _CubeMapIntensity;
-                //float3 getSH = ShadeSH9(float4(normalDir, 1.0));                                                  //方法二: 球谐函数
-                float3 indirectDiffuse = kd * baseColor * envLightDiffuseEnergy;
+                //float3 envLightDiffuseEnergySH = ShadeSH9(float4(normalDir, 1.0));                                //方法二: 球谐函数
+                float3 indirectDiffuse = pow(kd * baseColor * envLightDiffuseEnergy, 1 / 2.2);
 
                 float3 finalRGB = (directSpecular + directDiffuse + indirectSpecular + indirectDiffuse) * ao;
                 return float4(finalRGB,1.0);
